@@ -61,6 +61,7 @@ pinecone==6.0.2
 
 transformers
 sentence-transformers==4.1.0
+scikit-learn==1.7.1
 accelerate
 colbert-ai==0.2.21
 einops==0.8.1
