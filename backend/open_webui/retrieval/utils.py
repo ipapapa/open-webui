@@ -835,21 +835,19 @@ def generate_google_batch_embeddings(
         log.debug(
             f"generate_google_batch_embeddings:model {model} batch size: {len(texts)}"
         )
-        
+
         # Google's embedding API uses a different request format
         json_data = {
             "requests": [
-                {
-                    "model": f"models/{model}",
-                    "content": {"parts": [{"text": text}]}
-                } for text in texts
+                {"model": f"models/{model}", "content": {"parts": [{"text": text}]}}
+                for text in texts
             ]
         }
-        
+
         # Google's embeddings endpoint doesn't need /embeddings appended
         # Use the batch embeddings endpoint
         endpoint_url = f"{url}/models/{model}:batchEmbedContents"
-        
+
         r = requests.post(
             endpoint_url,
             headers={
@@ -870,7 +868,7 @@ def generate_google_batch_embeddings(
         )
         r.raise_for_status()
         data = r.json()
-        
+
         # Google's response format: {"embeddings": [{"values": [...]}, ...]}
         if "embeddings" in data:
             return [embedding["values"] for embedding in data["embeddings"]]
