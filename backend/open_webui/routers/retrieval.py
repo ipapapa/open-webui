@@ -77,6 +77,10 @@ from open_webui.retrieval.utils import (
     query_doc,
     query_doc_with_hybrid_search,
 )
+from open_webui.retrieval.grounding import (
+    apply_grounding_step,
+    format_documents_for_retrieval,
+)
 from open_webui.utils.misc import (
     calculate_sha256_string,
 )
@@ -92,6 +96,8 @@ from open_webui.config import (
     DEFAULT_LOCALE,
     RAG_EMBEDDING_CONTENT_PREFIX,
     RAG_EMBEDDING_QUERY_PREFIX,
+    RAG_ENABLE_GROUNDING_STEP,
+    RAG_GROUNDING_THRESHOLD,
 )
 from open_webui.env import (
     SRC_LOG_LEVELS,
@@ -2033,6 +2039,87 @@ class QueryDocForm(BaseModel):
     hybrid: Optional[bool] = None
 
 
+def apply_grounding_to_results(
+    query: str,
+    query_embedding: list[float],
+    results: dict,
+    embedding_function,
+    grounding_enabled: bool,
+    grounding_threshold: float,
+    user=None
+) -> dict:
+    """
+    Apply grounding step to query results if enabled.
+    
+    Args:
+        query: Original query string
+        query_embedding: Query embedding vector
+        results: Results from query_doc or query_collection
+        embedding_function: Function to generate embeddings
+        grounding_enabled: Whether grounding is enabled
+        grounding_threshold: Threshold for grounding validation
+        user: User context
+    
+    Returns:
+        Results dictionary, potentially filtered by grounding step
+    """
+    if not grounding_enabled or not results or not results.get('documents'):
+        return results
+    
+    try:
+        # Extract documents from results format
+        documents_list = results['documents'][0] if results['documents'] else []
+        ids_list = results.get('ids', [[]])[0] if results.get('ids') else []
+        distances_list = results.get('distances', [[]])[0] if results.get('distances') else []
+        metadatas_list = results.get('metadatas', [[]])[0] if results.get('metadatas') else []
+        
+        # Convert to document format for grounding
+        documents_for_grounding = []
+        for i, doc_text in enumerate(documents_list):
+            doc_dict = {
+                'document': doc_text,
+                'id': ids_list[i] if i < len(ids_list) else '',
+                'distance': distances_list[i] if i < len(distances_list) else 0.0,
+                'metadata': metadatas_list[i] if i < len(metadatas_list) else {}
+            }
+            documents_for_grounding.append(doc_dict)
+        
+        # Apply grounding step
+        grounding_result = apply_grounding_step(
+            query=query,
+            query_embedding=query_embedding,
+            retrieved_documents=documents_for_grounding,
+            embedding_function=embedding_function,
+            threshold=grounding_threshold,
+            user=user
+        )
+        
+        # Convert back to results format
+        if grounding_result.validated_documents:
+            validated_results = format_documents_for_retrieval(grounding_result.validated_documents)
+            
+            # Log grounding metrics
+            if grounding_result.filtered_count > 0:
+                log.info(f"Grounding step filtered {grounding_result.filtered_count} documents "
+                        f"(confidence: {grounding_result.average_confidence:.3f})")
+            
+            return validated_results
+        else:
+            # Return empty results if no documents passed grounding
+            return {
+                "ids": [[]],
+                "distances": [[]],
+                "metadatas": [[]],
+                "documents": [[]],
+                "embeddings": None
+            }
+            
+    except Exception as e:
+        log.error(f"Error applying grounding step: {e}")
+        # Return original results if grounding fails
+        return results
+
+
 @router.post("/query/doc")
 def query_doc_handler(
     request: Request,
@@ -2040,12 +2127,18 @@ def query_doc_handler(
     user=Depends(get_verified_user),
 ):
     try:
+        # Generate query embedding (needed for both retrieval and grounding)
+        query_embedding = request.app.state.EMBEDDING_FUNCTION(
+            form_data.query, prefix=RAG_EMBEDDING_QUERY_PREFIX, user=user
+        )
+        
+        # Perform retrieval
         if request.app.state.config.ENABLE_RAG_HYBRID_SEARCH:
             collection_results = {}
             collection_results[form_data.collection_name] = VECTOR_DB_CLIENT.get(
                 collection_name=form_data.collection_name
             )
-            return query_doc_with_hybrid_search(
+            results = query_doc_with_hybrid_search(
                 collection_name=form_data.collection_name,
                 collection_result=collection_results[form_data.collection_name],
                 query=form_data.query,
@@ -2077,14 +2170,28 @@ def query_doc_handler(
                 user=user,
             )
         else:
-            return query_doc(
+            results = query_doc(
                 collection_name=form_data.collection_name,
-                query_embedding=request.app.state.EMBEDDING_FUNCTION(
-                    form_data.query, prefix=RAG_EMBEDDING_QUERY_PREFIX, user=user
-                ),
+                query_embedding=query_embedding,
                 k=form_data.k if form_data.k else request.app.state.config.TOP_K,
                 user=user,
             )
+        
+        # Apply grounding step if enabled
+        grounded_results = apply_grounding_to_results(
+            query=form_data.query,
+            query_embedding=query_embedding,
+            results=results,
+            embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
+                query, prefix=prefix, user=user
+            ),
+            grounding_enabled=request.app.state.config.RAG_ENABLE_GROUNDING_STEP,
+            grounding_threshold=request.app.state.config.RAG_GROUNDING_THRESHOLD,
+            user=user
+        )
+        
+        return grounded_results
+        
     except Exception as e:
         log.exception(e)
         raise HTTPException(
@@ -2110,8 +2217,14 @@ def query_collection_handler(
     user=Depends(get_verified_user),
 ):
     try:
+        # Generate query embedding (needed for both retrieval and grounding)
+        query_embedding = request.app.state.EMBEDDING_FUNCTION(
+            form_data.query, prefix=RAG_EMBEDDING_QUERY_PREFIX, user=user
+        )
+        
+        # Perform retrieval
         if request.app.state.config.ENABLE_RAG_HYBRID_SEARCH:
-            return query_collection_with_hybrid_search(
+            results = query_collection_with_hybrid_search(
                 collection_names=form_data.collection_names,
                 queries=[form_data.query],
                 embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
@@ -2141,7 +2254,7 @@ def query_collection_handler(
                 ),
             )
         else:
-            return query_collection(
+            results = query_collection(
                 collection_names=form_data.collection_names,
                 queries=[form_data.query],
                 embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
@@ -2149,6 +2262,21 @@ def query_collection_handler(
                 ),
                 k=form_data.k if form_data.k else request.app.state.config.TOP_K,
             )
+        
+        # Apply grounding step if enabled
+        grounded_results = apply_grounding_to_results(
+            query=form_data.query,
+            query_embedding=query_embedding,
+            results=results,
+            embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
+                query, prefix=prefix, user=user
+            ),
+            grounding_enabled=request.app.state.config.RAG_ENABLE_GROUNDING_STEP,
+            grounding_threshold=request.app.state.config.RAG_GROUNDING_THRESHOLD,
+            user=user
+        )
+        
+        return grounded_results
 
     except Exception as e:
         log.exception(e)

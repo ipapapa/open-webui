@@ -271,6 +271,26 @@ When switching between embedding providers, be aware that:
 3. **Consider hybrid approaches** - Some production systems use multiple embedding models for robustness
 4. **Document your testing process** - Keep records of what works best for your specific use case
 
+### RAG Grounding Step (Experimental)
+
+Open WebUI includes an optional grounding step that validates retrieved documents against the original query to prevent semantic drift:
+
+```bash
+# Enable grounding step validation
+RAG_ENABLE_GROUNDING_STEP=true
+RAG_GROUNDING_THRESHOLD=0.3  # Minimum similarity threshold (0.0-1.0)
+```
+
+**How it works:**
+- After retrieval, documents are re-embedded and compared with the query embedding
+- Documents below the similarity threshold are filtered out
+- Helps catch "ghost matches" where similarity scores are high but semantic relevance is low
+
+**When to use:**
+- When switching between embedding providers frequently
+- In multilingual setups where semantic drift is more common
+- For production systems requiring high retrieval precision
+
 ## What's Next? 🌟
 
 Discover upcoming features on our roadmap in the [Open WebUI Documentation](https://docs.openwebui.com/roadmap/).
