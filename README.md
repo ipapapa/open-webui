@@ -282,11 +282,13 @@ RAG_GROUNDING_THRESHOLD=0.3  # Minimum similarity threshold (0.0-1.0)
 ```
 
 **How it works:**
+
 - After retrieval, documents are re-embedded and compared with the query embedding
 - Documents below the similarity threshold are filtered out
 - Helps catch "ghost matches" where similarity scores are high but semantic relevance is low
 
 **When to use:**
+
 - When switching between embedding providers frequently
 - In multilingual setups where semantic drift is more common
 - For production systems requiring high retrieval precision
