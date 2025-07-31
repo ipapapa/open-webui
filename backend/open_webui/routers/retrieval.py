@@ -2046,11 +2046,11 @@ def apply_grounding_to_results(
     embedding_function,
     grounding_enabled: bool,
     grounding_threshold: float,
-    user=None
+    user=None,
 ) -> dict:
     """
     Apply grounding step to query results if enabled.
-    
+
     Args:
         query: Original query string
         query_embedding: Query embedding vector
@@ -2059,31 +2059,35 @@ def apply_grounding_to_results(
         grounding_enabled: Whether grounding is enabled
         grounding_threshold: Threshold for grounding validation
         user: User context
-    
+
     Returns:
         Results dictionary, potentially filtered by grounding step
     """
-    if not grounding_enabled or not results or not results.get('documents'):
+    if not grounding_enabled or not results or not results.get("documents"):
         return results
-    
+
     try:
         # Extract documents from results format
-        documents_list = results['documents'][0] if results['documents'] else []
-        ids_list = results.get('ids', [[]])[0] if results.get('ids') else []
-        distances_list = results.get('distances', [[]])[0] if results.get('distances') else []
-        metadatas_list = results.get('metadatas', [[]])[0] if results.get('metadatas') else []
-        
+        documents_list = results["documents"][0] if results["documents"] else []
+        ids_list = results.get("ids", [[]])[0] if results.get("ids") else []
+        distances_list = (
+            results.get("distances", [[]])[0] if results.get("distances") else []
+        )
+        metadatas_list = (
+            results.get("metadatas", [[]])[0] if results.get("metadatas") else []
+        )
+
         # Convert to document format for grounding
         documents_for_grounding = []
         for i, doc_text in enumerate(documents_list):
             doc_dict = {
-                'document': doc_text,
-                'id': ids_list[i] if i < len(ids_list) else '',
-                'distance': distances_list[i] if i < len(distances_list) else 0.0,
-                'metadata': metadatas_list[i] if i < len(metadatas_list) else {}
+                "document": doc_text,
+                "id": ids_list[i] if i < len(ids_list) else "",
+                "distance": distances_list[i] if i < len(distances_list) else 0.0,
+                "metadata": metadatas_list[i] if i < len(metadatas_list) else {},
             }
             documents_for_grounding.append(doc_dict)
-        
+
         # Apply grounding step
         grounding_result = apply_grounding_step(
             query=query,
@@ -2091,18 +2095,22 @@ def apply_grounding_to_results(
             retrieved_documents=documents_for_grounding,
             embedding_function=embedding_function,
             threshold=grounding_threshold,
-            user=user
+            user=user,
         )
-        
+
         # Convert back to results format
         if grounding_result.validated_documents:
-            validated_results = format_documents_for_retrieval(grounding_result.validated_documents)
-            
+            validated_results = format_documents_for_retrieval(
+                grounding_result.validated_documents
+            )
+
             # Log grounding metrics
             if grounding_result.filtered_count > 0:
-                log.info(f"Grounding step filtered {grounding_result.filtered_count} documents "
-                        f"(confidence: {grounding_result.average_confidence:.3f})")
-            
+                log.info(
+                    f"Grounding step filtered {grounding_result.filtered_count} documents "
+                    f"(confidence: {grounding_result.average_confidence:.3f})"
+                )
+
             return validated_results
         else:
             # Return empty results if no documents passed grounding
@@ -2111,9 +2119,9 @@ def apply_grounding_to_results(
                 "distances": [[]],
                 "metadatas": [[]],
                 "documents": [[]],
-                "embeddings": None
+                "embeddings": None,
             }
-            
+
     except Exception as e:
         log.error(f"Error applying grounding step: {e}")
         # Return original results if grounding fails
@@ -2131,7 +2139,7 @@ def query_doc_handler(
         query_embedding = request.app.state.EMBEDDING_FUNCTION(
             form_data.query, prefix=RAG_EMBEDDING_QUERY_PREFIX, user=user
         )
-        
+
         # Perform retrieval
         if request.app.state.config.ENABLE_RAG_HYBRID_SEARCH:
             collection_results = {}
@@ -2176,7 +2184,7 @@ def query_doc_handler(
                 k=form_data.k if form_data.k else request.app.state.config.TOP_K,
                 user=user,
             )
-        
+
         # Apply grounding step if enabled
         grounded_results = apply_grounding_to_results(
             query=form_data.query,
@@ -2187,11 +2195,11 @@ def query_doc_handler(
             ),
             grounding_enabled=request.app.state.config.RAG_ENABLE_GROUNDING_STEP,
             grounding_threshold=request.app.state.config.RAG_GROUNDING_THRESHOLD,
-            user=user
+            user=user,
         )
-        
+
         return grounded_results
-        
+
     except Exception as e:
         log.exception(e)
         raise HTTPException(
@@ -2221,7 +2229,7 @@ def query_collection_handler(
         query_embedding = request.app.state.EMBEDDING_FUNCTION(
             form_data.query, prefix=RAG_EMBEDDING_QUERY_PREFIX, user=user
         )
-        
+
         # Perform retrieval
         if request.app.state.config.ENABLE_RAG_HYBRID_SEARCH:
             results = query_collection_with_hybrid_search(
@@ -2262,7 +2270,7 @@ def query_collection_handler(
                 ),
                 k=form_data.k if form_data.k else request.app.state.config.TOP_K,
             )
-        
+
         # Apply grounding step if enabled
         grounded_results = apply_grounding_to_results(
             query=form_data.query,
@@ -2273,9 +2281,9 @@ def query_collection_handler(
             ),
             grounding_enabled=request.app.state.config.RAG_ENABLE_GROUNDING_STEP,
             grounding_threshold=request.app.state.config.RAG_GROUNDING_THRESHOLD,
-            user=user
+            user=user,
         )
-        
+
         return grounded_results
 
     except Exception as e:
